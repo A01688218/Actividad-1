@@ -1,39 +1,185 @@
-# History files
-.Rhistory
-.Rapp.history
+library(dplyr)  # data wrangling
+library(ggplot2) # plotting
+library(tidyverse) # cleaning data
+library(moments) # calculating statistics
+library(forcats)  # editing factors
+library(gridExtra) # plotting
+library(RColorBrewer) # plotting
+library(rsample)     # data splitting       
+library(Metrics) # calculating RMSE
 
-# Session Data files
-.RData
+######################carga de datos######################
+salaries_data <- read.csv('C:\\Users\\eduar\\OneDrive - Instituto Tecnologico y de Estudios Superiores de Monterrey\\Tec Monterrey Adm TI M\\4. Analisis y minería de datos para la toma de desiciones\\A2\\ds_salaries.csv')
+glimpse(salaries_data)
 
-# User-specific files
-.Ruserdata
+######################Eliminando algunas columnas######################
+salaries_data <- salaries_data%>% 
+  mutate_if(sapply(salaries_data, is.character), as.factor)%>% 
+  select(-c(X,salary,salary_currency)) 
+glimpse(salaries_data)
+#Se omitieron las columnas que contenían Id., salary y salary_currency. 
+#Es difícil comparar salarios en diferentes monedas, por lo que las columnas no son estadísticamente importantes. 
+#Además, las cadenas se transformaron en factores que ahora son confusos y difíciles de entender a primera vista.
 
-# Example code in package build process
-*-Ex.R
 
-# Output files from R CMD build
-/*.tar.gz
+######################Renombrar y reordenar factores######################
+salaries_data <- salaries_data %>% 
+  mutate(experience_level = recode(experience_level,  
+                                   EN = "Entry/Junior", 
+                                   MI = "Mid-level", 
+                                   SE = "Senior/Expert", 
+                                   EX = "Executive"))%>% 
+  mutate(employment_type = recode(employment_type,   
+                                  PT = "Part Time", 
+                                  FT = "Full Time", 
+                                  CT = "Contract", 
+                                  FL = "Freelance"))%>%  
+  mutate(remote_ratio = recode_factor(remote_ratio,
+                                      '0'= "Stationary", 
+                                      '50' = "Partially remote", 
+                                      '100' = "Remote")) 
 
-# Output files from R CMD check
-/*.Rcheck/
 
-# RStudio files
-.Rproj.user/
 
-# produced vignettes
-vignettes/*.html
-vignettes/*.pdf
+glimpse(salaries_data)
 
-# OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
-.httr-oauth
+#Los niveles de los factores se cambiaron a valores más fáciles de usar,
+ 
+#ahora se pueden comprender correctamente.
 
-# knitr and R markdown default cache directories
-*_cache/
-/cache/
+######################Resumiendo los datos######################
+salaries_data %>% 
+  summary()
 
-# Temporary files created by R markdown
-*.utf8.md
-*.knit.md
+#Examinando datos, podemos ver que de la variable salarios posiblemente tengamos
 
-# R Environment Variables
-.Renviron
+
+######################datos atipicos, se graficara un histograma y una caja de vigotes######################
+
+bw <- 2 * IQR(salaries_data$salary_in_usd) / length(salaries_data$salary_in_usd)^(1/3)
+
+hist_salaries <- salaries_data%>% 
+  ggplot( mapping= aes(x = salary_in_usd)) +   
+  geom_histogram(binwidth = bw,color = "#000000", fill = "#0099F8", alpha = 0.6) +
+  theme_bw()
+
+box_salaries <- salaries_data%>% 
+  ggplot(mapping= aes(x = salary_in_usd)) + 
+  geom_boxplot(outlier.colour="black", outlier.shape=16,
+               outlier.size=2, notch=FALSE) + 
+  theme_bw()
+
+grid.arrange(hist_salaries, box_salaries, ncol = 2)
+
+
+#Los contenedores de histograma se calcularon a partir de la fórmula de la regla Freedman-Diaconis. 
+#Podemos ver claramente en ambos gráficos que los datos tienen valores atípicos que 
+#pueden influir en nuestra investigación. 
+#A partir de la forma del histograma, podemos suponer que los datos tienen un sesgo altamente positivo.
+
+
+print(paste0("Skewness of salary: " , skewness(salaries_data$salary_in_usd)))
+#La asimetría es, de hecho, muy alta y, dado que nuestros datos son salarios, 
+#utilizaremos la mediana, que no pretende representar la mitad de un grupo.
+
+
+######################Plot de salary year por year######################
+salaries_data%>% 
+  group_by(work_year)%>% 
+  summarize( 
+    median_salary = median(salary_in_usd, na.rm = TRUE))%>% 
+  ggplot(mapping = aes(x=work_year, y =median_salary ))+ 
+  geom_line()+ 
+  theme_bw()+ labs(y = "Salary Median (USD)", x = "Year", title = "Median of salary in Data related jobs in last three years")
+
+
+#En este gráfico podemos observar una mediana de salario similar en 2020 y 2021 
+#y un aumento de más del 30 % en 2022
+
+
+######################Media salary por company_size######################
+salaries_data$company_size <- factor(salaries_data$company_size, levels=c("S","M","L"))
+p1 <- salaries_data %>% 
+  group_by(company_size)%>% 
+  summarize( 
+    median_salary = median(salary_in_usd, na.rm = TRUE))%>% 
+  ggplot(mapping = aes(x=company_size, y =median_salary, fill=company_size ))+ 
+  geom_bar(stat = 'Identity')+     
+  theme_bw()+ labs(y = "Salary Median (USD)", x = "Company Size", title = "Median of salary in Data related jobs by company size") 
+
+p1 +  scale_fill_brewer(palette = "Pastel1")
+
+#Las vacantes mejor pagadas se encuentran en las medianas empresas seguidas de las grandes. 
+#Las pequeñas empresas tienen una diferencia salarial visible.
+
+
+######################salary por experience_level######################
+
+p2 <- salaries_data %>% 
+  group_by(experience_level)%>% 
+  summarize( 
+    median_salary = median(salary_in_usd, na.rm = TRUE))%>% 
+  ggplot(mapping = aes(x=fct_reorder(experience_level,median_salary), y =median_salary,fill = experience_level ))+ 
+  geom_bar(stat = 'Identity')+ 
+  geom_hline(yintercept = median(salaries_data$salary_in_usd, na.rm=TRUE), color = 'red')+     
+  theme_bw()+ labs(y = "Salary Median (USD)", x = "Experience Level", title = "Median of salary in Data related jobs by experience level")  
+
+p2 + scale_fill_brewer(palette = "Pastel1")
+
+#Como podemos esperar aumentos salariales con el nivel de experiencia
+
+
+#Salary por company_location
+nb.cols <- 50
+mycolors <- colorRampPalette(brewer.pal(8, "Pastel1"))(nb.cols)
+p3 <-salaries_data %>% 
+  group_by(company_location)%>% 
+  summarize( 
+    median_salary = median(salary_in_usd, na.rm = TRUE))%>% 
+  ggplot(mapping = aes(x=company_location, y =median_salary, fill = company_location ))+ 
+  geom_bar(stat = 'Identity')+ 
+  geom_hline(yintercept = median(salaries_data$salary_in_usd, na.rm=TRUE), color = 'red')+     
+  theme_bw()+ labs(y = "Salary Median (USD)", x = "Company Location", title = "Median of salary in Data related jobs by company location")
+p3+    scale_fill_manual(values = mycolors)
+
+
+#En este grafico nos podemos dar cuenta de la brecha salarial por pais.
+#La mayor cantidad de la data de US y la media de este pais es mayor.
+#Solo 5 paises de 50 tienen una media más alta que el promedio.
+
+
+
+
+######################Número de trabajadores en company_size y experience_level######################
+salaries_data$experience_level <- factor(salaries_data$experience_level, levels=c("Entry/Junior", "Mid-level", "Senior/Expert","Executive"))
+
+p4 <- salaries_data%>% 
+  group_by(experience_level, company_size)%>% 
+  count()%>% 
+  ggplot(mapping = aes(y = experience_level, x = n, fill = experience_level))+ 
+  geom_bar(stat = 'Identity')+ 
+  facet_wrap(~company_size)+ 
+  theme_bw()+ labs(y = "Experience Level", x = "Number of positions", title = "Number of positions by experience level and company size")  
+
+p4  + scale_fill_brewer(palette = "Pastel1")
+
+#Este gráfico muestra cómo se estructuran las empresas. 
+#Podemos ver que la mayoría de los seniors y expertos trabajan en medianas empresas. 
+#La estructura de las empresas grandes y pequeñas es más plana.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
