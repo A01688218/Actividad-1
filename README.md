@@ -1,2 +1,2 @@
-# Actividad-1
+# Actividad-2
 Minería de datos A1
